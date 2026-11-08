@@ -27,7 +27,11 @@
 
 namespace {
 
-const char* kVersion = "1.0.0";
+// 版本号由构建系统注入（CMake: CMAKE_PROJECT_VERSION / Makefile: -DBAN_VERSION）
+#ifndef BAN_VERSION
+#define BAN_VERSION "0.0.0-dev"
+#endif
+const char* kVersion = BAN_VERSION;
 const char* kDefaultEtcDir = "/etc/ban";
 
 enum ExitCode {
