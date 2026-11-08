@@ -1,5 +1,7 @@
 # 构建产物
 /build/
+/build-release/
+/dist/
 /ban
 /ban_tests
 

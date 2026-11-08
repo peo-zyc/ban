@@ -1,0 +1,34 @@
+# Maintainer: peo-zyc <peo-zyc@users.noreply.github.com>
+# 由 packaging/build-release.sh 自动把预编译的静态链接二进制打进包。
+pkgname=ban
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Linux 域名/IP 封禁 CLI（nftables / iptables 双后端，规则常驻内核，无常驻进程）"
+arch=('x86_64')
+url="https://github.com/peo-zyc/ban"
+license=('MIT')
+depends=('glibc')
+optdepends=(
+  'nftables: 默认防火墙后端（推荐）'
+  'iptables: nftables 不可用时的回退后端'
+  'ipset: iptables 后端的集合加速'
+  'dnsmasq: 域名子域通配阻断'
+)
+options=('!strip' '!emptydirs')
+source=('ban' 'README.md' 'LICENSE'
+        'ban-restore.service' 'ban-refresh.service' 'ban-refresh.timer')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm755 "$srcdir/ban" "$pkgdir/usr/bin/ban"
+
+  install -Dm644 "$srcdir/ban-restore.service" \
+    "$pkgdir/usr/lib/systemd/system/ban-restore.service"
+  install -Dm644 "$srcdir/ban-refresh.service" \
+    "$pkgdir/usr/lib/systemd/system/ban-refresh.service"
+  install -Dm644 "$srcdir/ban-refresh.timer" \
+    "$pkgdir/usr/lib/systemd/system/ban-refresh.timer"
+
+  install -Dm644 "$srcdir/README.md" "$pkgdir/usr/share/doc/ban/README.md"
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/doc/ban/LICENSE"
+}
