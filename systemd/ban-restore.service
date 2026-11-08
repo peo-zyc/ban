@@ -1,0 +1,22 @@
+[Unit]
+Description=ban: restore blocked domain/IP rules at boot
+Documentation=man:ban(1)
+ConditionPathExists=/etc/ban/rules.conf
+After=local-fs.target
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/bin/ban restore --quiet
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/etc/ban /etc/hosts /etc/dnsmasq.d /var/log
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

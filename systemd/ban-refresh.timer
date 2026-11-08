@@ -1,0 +1,13 @@
+[Unit]
+Description=ban: periodic refresh timer
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=10min
+RandomizedDelaySec=30s
+AccuracySec=15s
+Persistent=true
+Unit=ban-refresh.service
+
+[Install]
+WantedBy=timers.target

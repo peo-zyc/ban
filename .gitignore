@@ -1,0 +1,22 @@
+# 构建产物
+/build/
+/ban
+/ban_tests
+
+# 编译中间文件
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# 编辑器 / 工具缓存
+compile_commands.json
+.cache/
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.log
