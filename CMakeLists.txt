@@ -27,6 +27,7 @@ set(BAN_SOURCES
 
 add_executable(ban ${BAN_SOURCES})
 target_include_directories(ban PRIVATE src)
+target_compile_definitions(ban PRIVATE BAN_VERSION="${PROJECT_VERSION}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(ban PRIVATE -Wall -Wextra -Wpedantic -O2)

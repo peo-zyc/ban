@@ -49,7 +49,7 @@ echo "==> 打包便携二进制"
 stage_portable "" "$BIN"
 
 echo "==> 尝试全静态构建"
-if g++ -std=c++17 -O2 -static -Isrc -o "$WORK/ban-static" src/*.cpp 2>"$WORK/static.log"; then
+if g++ -std=c++17 -O2 -static -DBAN_VERSION="\"$VERSION\"" -Isrc -o "$WORK/ban-static" src/*.cpp 2>"$WORK/static.log"; then
     if "$WORK/ban-static" --version >/dev/null 2>&1; then
         strip --strip-all "$WORK/ban-static"
         stage_portable "-static" "$WORK/ban-static"

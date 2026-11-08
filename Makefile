@@ -1,6 +1,7 @@
 # 便捷构建（不依赖 cmake）
 CXX      ?= g++
-CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic
+VERSION  ?= $(shell sed -n 's/^project(ban VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)
+CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic -DBAN_VERSION=\"$(VERSION)\"
 LDFLAGS  ?= -static-libstdc++ -static-libgcc
 SRCS     := $(wildcard src/*.cpp)
 HDRS     := $(wildcard src/*.h)
