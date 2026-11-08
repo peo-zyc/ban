@@ -73,6 +73,28 @@ sudo ban install
 
 常用参数：`--bindir 目录`、`--interval 分钟`、`--backend nft|iptables|auto`、`--action reject|drop`、`--no-systemd`。
 
+### 直接使用发行包
+
+从 [Releases](https://github.com/peo-zyc/ban/releases) 下载对应产物：
+
+| 文件 | 适用系统 | 安装方式 |
+| --- | --- | --- |
+| `ban_1.0.0_amd64.deb` | Debian / Ubuntu | `sudo dpkg -i ban_1.0.0_amd64.deb` |
+| `ban-1.0.0-1-x86_64.pkg.tar.zst` | Arch / CachyOS / Manjaro | `sudo pacman -U ban-1.0.0-1-x86_64.pkg.tar.zst` |
+| `ban-1.0.0-x86_64-linux.tar.gz` | 任意 glibc 发行版 | 解压后 `install -Dm755 ban /usr/local/bin/ban` |
+| `ban-1.0.0-x86_64-linux-static.tar.gz` | 无依赖（全静态） | 同上，可跑在任意 x86_64 Linux |
+| `ban-1.0.0.tar.gz` | 源码包 | `rpmbuild -ta ban-1.0.0.tar.gz`（openSUSE / Fedora） |
+
+装完执行一次 `sudo ban install` 即可。
+
+自行从源码构建全部发行包：
+
+```bash
+sh packaging/build-release.sh        # 产出到 dist/，含 SHA256SUMS
+```
+
+> openSUSE / Fedora 的 RPM 需要 `rpmbuild`（`sudo zypper install rpm-build`），spec 见 `packaging/rpm/ban.spec`。
+
 ## 命令
 
 | 命令 | 说明 |

@@ -71,7 +71,7 @@ install -m644 systemd/ban-restore.service systemd/ban-refresh.service \
               systemd/ban-refresh.timer "$DEB/usr/lib/systemd/system/"
 install -m644 README.md LICENSE "$DEB/usr/share/doc/$NAME/"
 
-(cd "$DEB" && find usr -type f -printf '%P\n' | sort | xargs -r md5sum > DEBIAN/md5sums)
+(cd "$DEB" && find usr -type f | sort | xargs -r md5sum > DEBIAN/md5sums)
 INSTALLED_SIZE=$(du -sk "$DEB/usr" | cut -f1)
 
 cat > "$DEB/DEBIAN/control" <<EOF
