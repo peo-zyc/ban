@@ -15,6 +15,8 @@
 
 namespace {
 
+std::string g_resolv_conf = "/etc/resolv.conf";
+
 bool is_loopback_server(const std::string& ip) {
     if (ip == "::1") return true;
     if (util::starts_with(ip, "127.")) return true;
@@ -256,7 +258,9 @@ std::vector<std::string> read_nameservers_from(const std::string& path) {
 }
 
 std::vector<std::string> dns_servers() {
-    std::vector<std::string> primary = read_nameservers_from("/etc/resolv.conf");
+    const bool is_default = (g_resolv_conf == "/etc/resolv.conf");
+
+    std::vector<std::string> primary = read_nameservers_from(g_resolv_conf);
 
     bool all_loopback = !primary.empty();
     for (const std::string& s : primary) {
@@ -266,7 +270,7 @@ std::vector<std::string> dns_servers() {
         }
     }
 
-    if (primary.empty() || all_loopback) {
+    if (is_default && (primary.empty() || all_loopback)) {
         // systemd-resolved 场景：/etc/resolv.conf 只有 127.0.0.53，
         // 真实上游记录在 /run/systemd/resolve/resolv.conf。
         std::vector<std::string> real = read_nameservers_from("/run/systemd/resolve/resolv.conf");
@@ -278,6 +282,10 @@ std::vector<std::string> dns_servers() {
         if (!real.empty()) return real;
     }
     return primary;
+}
+
+void set_resolv_conf(const std::string& path) {
+    if (!path.empty()) g_resolv_conf = path;
 }
 
 DnsAnswer dns_resolve(const std::string& domain, int timeout_ms) {

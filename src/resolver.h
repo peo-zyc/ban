@@ -15,6 +15,9 @@ struct DnsAnswer {
 // 不经过 /etc/hosts 与 nsswitch，因此不会被本程序的 DNS 层封禁反向污染。
 DnsAnswer dns_resolve(const std::string& domain, int timeout_ms = 3000);
 
+// 覆盖上游 DNS 配置文件路径（默认 /etc/resolv.conf）
+void set_resolv_conf(const std::string& path);
+
 // 当前实际使用的上游服务器列表（可能是 /run/systemd/resolve/resolv.conf 中的真实上游）
 std::vector<std::string> dns_servers();
 

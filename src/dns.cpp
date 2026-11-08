@@ -1,10 +1,13 @@
 #include "dns.h"
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <sstream>
 
 #include "log.h"
+#include "resolver.h"
 #include "util.h"
 
 namespace dnsblock {
@@ -13,23 +16,51 @@ namespace {
 const char* kBeginMark = "# >>> ban managed block (do not edit) >>>";
 const char* kEndMark = "# <<< ban managed block <<<";
 
+// NetworkManager 自己启动 dnsmasq 时只读这个目录（而非 /etc/dnsmasq.d）
+const char* kNmDnsmasqDir = "/etc/NetworkManager/dnsmasq.d";
+const char* kNmDispatcherDir = "/etc/NetworkManager/dispatcher.d";
+const char* kNmDispatcher = "/etc/NetworkManager/dispatcher.d/50-ban";
+
+std::string nm_conf_path() { return std::string(kNmDnsmasqDir) + "/ban.conf"; }
+
 bool exists_in_path(const std::string& cmd) {
-    std::string p = std::getenv("PATH") ? std::getenv("PATH") : "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    const char* env = std::getenv("PATH");
+    std::string p = env ? env : "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
     for (const std::string& dir : util::split(p, ':', false)) {
         if (util::path_exists(dir + "/" + cmd)) return true;
     }
     return false;
 }
 
+bool run_ok(const std::vector<std::string>& argv, int timeout = 20) {
+    return util::run(argv, "", timeout).ok();
+}
+
+// 让 dnsmasq 重新加载配置。覆盖三种部署形态：
+//   1) 传统 dnsmasq.service（已运行时才 reload/restart，绝不“顺手启动”它）
+//   2) sysv-init 的 service 命令
+//   3) NetworkManager fork 的 dnsmasq（让 NM 重读 drop-in；
+//      不重启 NM —— 那会中断用户网络，代价太大）
 bool reload_dnsmasq(std::string* err) {
-    util::ExecResult r = util::run({"systemctl", "reload", "dnsmasq"}, "", 20);
-    if (r.ok()) return true;
-    r = util::run({"systemctl", "restart", "dnsmasq"}, "", 30);
-    if (r.ok()) return true;
-    r = util::run({"service", "dnsmasq", "reload"}, "", 20);
-    if (r.ok()) return true;
+    util::ExecResult act = util::run({"systemctl", "is-active", "dnsmasq"}, "", 8);
+    const bool unit_active = act.ok() && util::trim(act.out) == "active";
+
+    if (unit_active) {
+        if (run_ok({"systemctl", "reload", "dnsmasq"})) return true;
+        if (run_ok({"systemctl", "restart", "dnsmasq"})) return true;
+    } else if (run_ok({"service", "dnsmasq", "reload"})) {
+        return true;
+    }
+
+    if (networkmanager_active()) {
+        if (exists_in_path("nmcli")) {
+            run_ok({"nmcli", "general", "reload", "dns-rc"}, 20);
+        }
+        if (run_ok({"systemctl", "reload", "NetworkManager"}, 30)) return true;
+    }
+
     if (err) {
-        *err = "dnsmasq 重载失败（配置已写入，但尚未生效）：" + util::trim(r.err);
+        *err = "无法让 dnsmasq 重新加载配置（服务未运行，或由 NetworkManager 接管）";
     }
     return false;
 }
@@ -91,6 +122,12 @@ std::string strip_hosts_block(const std::string& text, bool* had_block) {
     return out;
 }
 
+bool hosts_block_present(const Config& cfg) {
+    std::string text;
+    if (!util::read_file(cfg.hosts_file, text)) return false;
+    return text.find(kBeginMark) != std::string::npos;
+}
+
 bool write_hosts(const Config& cfg, const std::vector<std::string>& domains, std::string* err) {
     std::string text;
     if (!util::read_file(cfg.hosts_file, text)) {
@@ -117,32 +154,78 @@ bool write_hosts(const Config& cfg, const std::vector<std::string>& domains, std
     return true;
 }
 
-bool write_dnsmasq(const Config& cfg, const std::vector<std::string>& domains, std::string* err) {
+// 清理两个 dnsmasq drop-in 位置
+bool remove_dnsmasq_conf(const Config& cfg, std::string* err) {
+    bool changed = false;
+    if (util::path_exists(cfg.dnsmasq_file) && util::remove_file(cfg.dnsmasq_file)) changed = true;
+
+    const std::string nmf = nm_conf_path();
+    if (util::path_exists(nmf) && util::remove_file(nmf)) changed = true;
+
+    if (!changed) return true;
+    return reload_dnsmasq(err);
+}
+
+// 写入两个 dnsmasq drop-in 位置并重载
+bool apply_dnsmasq(const Config& cfg, const std::vector<std::string>& domains, std::string* err) {
+    if (domains.empty()) return remove_dnsmasq_conf(cfg, err);
+
+    const std::string content = render_dnsmasq(domains);
+    std::string werr;
+
     std::string mkerr;
     if (!util::is_directory(cfg.dnsmasq_dir) && !util::make_dirs(cfg.dnsmasq_dir, 0755, &mkerr)) {
         if (err) *err = mkerr;
         return false;
     }
-
-    if (domains.empty()) {
-        if (util::path_exists(cfg.dnsmasq_file) && !util::remove_file(cfg.dnsmasq_file)) {
-            if (err) *err = "无法删除 " + cfg.dnsmasq_file;
-            return false;
-        }
-        return reload_dnsmasq(err);
-    }
-
-    std::string werr;
-    if (!util::write_file_atomic(cfg.dnsmasq_file, render_dnsmasq(domains), 0644, false, &werr)) {
+    if (!util::write_file_atomic(cfg.dnsmasq_file, content, 0644, false, &werr)) {
         if (err) *err = werr;
         return false;
     }
+
+    // NetworkManager 托管的 dnsmasq 只加载 /etc/NetworkManager/dnsmasq.d
+    if (nm_dnsmasq_dir_present()) {
+        const std::string nmf = nm_conf_path();
+        if (!util::write_file_atomic(nmf, content, 0644, false, &werr)) {
+            logx::warn("写入 " + nmf + " 失败: " + werr);
+        }
+    }
+
     return reload_dnsmasq(err);
+}
+
+// 阻断是否真的生效：探测一个被封禁的域名，看是否返回 0.0.0.0 / ::
+enum class Probe { Ok, Failed, Unknown };
+
+Probe probe_block(const std::vector<std::string>& domains) {
+    for (const std::string& d : domains) {
+        DnsAnswer a = dns_resolve(d, 2000);
+        if (!a.ok) continue;  // 无法解析，换下一个目标
+
+        bool hit = false;
+        for (const std::string& ip : a.v4) {
+            if (ip == "0.0.0.0") hit = true;
+        }
+        for (const std::string& ip : a.v6) {
+            if (ip == "::") hit = true;
+        }
+        return hit ? Probe::Ok : Probe::Failed;
+    }
+    return Probe::Unknown;
 }
 
 }  // namespace
 
 bool dnsmasq_installed() { return exists_in_path("dnsmasq"); }
+
+bool networkmanager_active() {
+    util::ExecResult r = util::run({"systemctl", "is-active", "NetworkManager"}, "", 8);
+    return r.ok() && util::trim(r.out) == "active";
+}
+
+bool nm_dnsmasq_dir_present() { return util::is_directory(kNmDnsmasqDir); }
+
+bool nm_hook_installed() { return util::path_exists(kNmDispatcher); }
 
 bool dnsmasq_active(std::string* detail) {
     util::ExecResult r = util::run({"systemctl", "is-active", "dnsmasq"}, "", 10);
@@ -156,21 +239,34 @@ bool dnsmasq_usable(std::string* detail) {
         if (detail) *detail = "未安装";
         return false;
     }
-    return dnsmasq_active(detail);
+    if (dnsmasq_active(nullptr)) {
+        if (detail) *detail = "dnsmasq.service 正在运行";
+        return true;
+    }
+    if (networkmanager_active()) {
+        if (detail) *detail = "由 NetworkManager 托管";
+        return true;
+    }
+    if (detail) *detail = "未运行";
+    return false;
 }
 
 std::string detect_mode(const Config& cfg) {
     if (!cfg.dns_enabled) return "off";
     if (cfg.dns_mode == "off") return "off";
     if (cfg.dns_mode == "hosts") return "hosts";
+
     if (cfg.dns_mode == "dnsmasq") {
-        std::string d;
-        if (dnsmasq_usable(&d)) return "dnsmasq";
-        logx::debug("dns_mode=dnsmasq 但服务不可用（" + d + "），退回 hosts");
-        return "hosts";
+        if (!dnsmasq_installed()) {
+            logx::debug("dns_mode=dnsmasq 但未安装 dnsmasq，退回 hosts");
+            return "hosts";
+        }
+        return "dnsmasq";
     }
+
     std::string d;
     if (dnsmasq_usable(&d)) return "dnsmasq";
+    logx::debug("dnsmasq 不可用（" + d + "），使用 hosts 模式");
     return "hosts";
 }
 
@@ -180,6 +276,12 @@ Info describe(const Config& cfg) {
     if (info.mode == "dnsmasq") {
         info.path = cfg.dnsmasq_file;
         info.detail = "dnsmasq（支持子域通配）";
+        if (networkmanager_active()) {
+            info.detail += "，由 NetworkManager 托管";
+            if (!nm_hook_installed()) {
+                info.detail += "（建议执行 ban install 安装 NM 钩子）";
+            }
+        }
     } else if (info.mode == "hosts") {
         info.path = cfg.hosts_file;
         info.detail = "hosts 托管区块（仅精确匹配，不支持通配子域）";
@@ -190,12 +292,45 @@ Info describe(const Config& cfg) {
 }
 
 bool apply(const Config& cfg, const std::vector<std::string>& domains, std::string* err) {
-    std::string mode = detect_mode(cfg);
+    const std::string mode = detect_mode(cfg);
     if (mode == "off") {
         return teardown(cfg, err);
     }
+
     if (mode == "dnsmasq") {
-        return write_dnsmasq(cfg, domains, err);
+        std::string e;
+        const bool reload_ok = apply_dnsmasq(cfg, domains, &e);
+        if (!reload_ok) logx::warn("dnsmasq 重载失败: " + e);
+
+        Probe p = Probe::Unknown;
+        if (!domains.empty()) p = probe_block(domains);
+
+        // 只要不能确认 dnsmasq 已生效，就回退到能确定生效的 hosts 层。
+        // （典型场景：dnsmasq 由 NetworkManager 用自己的 --conf-file 启动，
+        //   /etc/dnsmasq.d 的 drop-in 根本不会被加载。）
+        if (p == Probe::Failed || (p == Probe::Unknown && !reload_ok)) {
+            if (p == Probe::Failed) {
+                logx::warn("dnsmasq 未实际生效（很可能被 NetworkManager 以自己的配置接管），回退到 hosts 模式");
+            } else {
+                logx::warn("无法确认 dnsmasq 已生效（" + e + "），回退到 hosts 模式");
+            }
+            std::string terr;
+            remove_dnsmasq_conf(cfg, &terr);
+            return write_hosts(cfg, domains, err);
+        }
+
+        // dnsmasq 已生效：清掉可能残留的 hosts 区块，避免两套配置同时存在
+        if (hosts_block_present(cfg)) {
+            std::string he;
+            if (!write_hosts(cfg, {}, &he)) logx::warn("清理 hosts 区块失败: " + he);
+        }
+        return true;
+    }
+
+    // hosts 模式：顺手清掉 dnsmasq 的残留配置
+    if (util::path_exists(cfg.dnsmasq_file) || util::path_exists(nm_conf_path())) {
+        std::string e;
+        if (!remove_dnsmasq_conf(cfg, &e)) logx::debug("清理 dnsmasq 配置: " + e);
     }
     return write_hosts(cfg, domains, err);
 }
@@ -203,16 +338,11 @@ bool apply(const Config& cfg, const std::vector<std::string>& domains, std::stri
 bool teardown(const Config& cfg, std::string* err) {
     bool ok = true;
 
-    // 清 dnsmasq 配置
-    if (util::path_exists(cfg.dnsmasq_file)) {
-        if (util::remove_file(cfg.dnsmasq_file)) {
-            std::string e;
-            if (!reload_dnsmasq(&e)) {
-                logx::warn(e);
-            }
-        } else {
-            if (err) *err = "无法删除 " + cfg.dnsmasq_file;
-            ok = false;
+    // 清 dnsmasq 配置（两个位置）
+    if (util::path_exists(cfg.dnsmasq_file) || util::path_exists(nm_conf_path())) {
+        std::string e;
+        if (!remove_dnsmasq_conf(cfg, &e)) {
+            logx::warn(e);
         }
     }
 
@@ -237,6 +367,41 @@ bool teardown(const Config& cfg, std::string* err) {
     return ok;
 }
 
+bool install_nm_hook(const std::string& bin, const std::string& etc_dir, std::string* err) {
+    if (!util::is_directory(kNmDispatcherDir)) {
+        if (err) *err = std::string("未找到 ") + kNmDispatcherDir + "（系统未使用 NetworkManager？）";
+        return false;
+    }
+
+    std::ostringstream os;
+    os << "#!/bin/sh\n"
+       << "# Installed by ban. 网络状态变化后重新下发封禁规则，\n"
+       << "# 防止 NetworkManager 重启 dnsmasq / 改写 resolv.conf 导致阻断静默失效。\n"
+       << "case \"$2\" in\n"
+       << "  up|down|vpn-up|vpn-down|connectivity-change|dhcp4-change|dhcp6-change)\n"
+       << "    [ -x \"" << bin << "\" ] && \"" << bin << "\" --etc-dir \"" << etc_dir
+       << "\" restore --quiet >/dev/null 2>&1\n"
+       << "    ;;\n"
+       << "esac\n"
+       << "exit 0\n";
+
+    std::string werr;
+    if (!util::write_file_atomic(kNmDispatcher, os.str(), 0755, false, &werr)) {
+        if (err) *err = werr;
+        return false;
+    }
+    // NetworkManager 要求脚本不可被组/其他用户写
+    ::chmod(kNmDispatcher, 0755);
+    return true;
+}
+
+bool remove_nm_hook(std::string* err) {
+    if (!util::path_exists(kNmDispatcher)) return true;
+    if (util::remove_file(kNmDispatcher)) return true;
+    if (err) *err = std::string("无法删除 ") + kNmDispatcher;
+    return false;
+}
+
 size_t count_hosts_entries(const Config& cfg) {
     std::string text;
     if (!util::read_file(cfg.hosts_file, text)) return 0;
@@ -255,6 +420,20 @@ size_t count_hosts_entries(const Config& cfg) {
         if (inside && util::starts_with(line, "0.0.0.0 ")) ++n;
     }
     return n;
+}
+
+size_t count_dnsmasq_entries() {
+    size_t n = 0;
+    for (const std::string& path : {std::string("/etc/dnsmasq.d/ban.conf"), nm_conf_path()}) {
+        std::string text;
+        if (!util::read_file(path, text)) continue;
+        size_t c = 0;
+        for (const std::string& raw : util::split(text, '\n', true)) {
+            if (util::starts_with(util::trim(raw), "address=/")) ++c;
+        }
+        if (c > n) n = c;
+    }
+    return n / 2;  // 每个域名写两行（A + AAAA）
 }
 
 }  // namespace dnsblock

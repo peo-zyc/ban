@@ -2,6 +2,26 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## v1.0.1 — 2026-11-08
+
+修复 dnsmasq 被系统网络管理接管导致阻断静默失效的问题。
+
+### 修复
+
+- **NetworkManager 接管 dnsmasq**：NM 会用自带的 `--conf-file` 启动 dnsmasq，既不读 `/etc/dnsmasq.d`，还会在每次网络事件后重启它。现在：
+  - 同时写入 `/etc/dnsmasq.d/ban.conf` 与 `/etc/NetworkManager/dnsmasq.d/ban.conf`
+  - 重载链覆盖 `dnsmasq.service`、sysv `service`、NM 托管（`nmcli general reload dns-rc`、`systemctl reload NetworkManager`）
+  - **不再"顺手启动"未运行的 dnsmasq**，也不重启 NetworkManager（避免中断用户网络）
+- **生效性探测 + 自动回退**：写入后真实解析一个被封禁域名，若拿不到 `0.0.0.0` 就判定 dnsmasq 未生效，自动回退到 hosts 托管区块并记录告警，不再出现"配置写了但没拦住"
+- **模式切换清理**：在 dnsmasq 与 hosts 之间切换时自动清除另一层的残留配置，避免两套规则并存或陈旧残留
+- **NM dispatcher 钩子**：`ban install` 现在会安装 `/etc/NetworkManager/dispatcher.d/50-ban`，在 `up/vpn-up/dhcp*-change` 等事件后自动重新下发规则；`ban uninstall` 会移除
+- 新增配置项 `resolv_conf`、`dnsmasq_dir`，便于特殊 DNS 环境与测试
+- `ban doctor` 增加 NetworkManager 运行状态、NM drop-in 目录、dispatcher 钩子的检查
+
+### 测试
+
+- 新增 `tests/dns-fallback.sh`：6 项回归（未运行→回退、auto 降级、模式切换清理、hosts 幂等、关闭 DNS 层、dnsmasq 真生效时不误降级）
+
 ## v1.0.0 — 2026-11-08
 
 首个正式版本。

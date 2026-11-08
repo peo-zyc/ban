@@ -13,6 +13,7 @@ struct Config {
     std::string lock_file;     // rules.lock
     std::string log_file = "/var/log/ban.log";
     std::string hosts_file = "/etc/hosts";
+    std::string resolv_conf = "/etc/resolv.conf";
     std::string dnsmasq_dir = "/etc/dnsmasq.d";
     std::string dnsmasq_file;  // dnsmasq_dir + "/ban.conf"
     std::string systemd_dir = "/usr/local/lib/systemd/system";

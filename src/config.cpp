@@ -73,6 +73,13 @@ Config Config::load(const std::string& etc_dir, std::string* err) {
             if (n > 0) c.refresh_interval_min = n;
         } else if (key == "hosts_file") {
             if (!val.empty()) c.hosts_file = val;
+        } else if (key == "resolv_conf") {
+            if (!val.empty()) c.resolv_conf = val;
+        } else if (key == "dnsmasq_dir") {
+            if (!val.empty()) {
+                c.dnsmasq_dir = val;
+                c.dnsmasq_file = c.dnsmasq_dir + "/ban.conf";
+            }
         } else if (key == "log_file") {
             if (!val.empty()) c.log_file = val;
         }
@@ -108,6 +115,8 @@ bool Config::save(std::string* err) const {
     s += std::string("enabled = ") + (enabled ? "true" : "false") + "\n";
     s += "refresh_interval_min = " + std::to_string(refresh_interval_min) + "\n";
     s += "hosts_file = " + hosts_file + "\n";
+    s += "resolv_conf = " + resolv_conf + "\n";
+    s += "dnsmasq_dir = " + dnsmasq_dir + "\n";
     s += "log_file = " + log_file + "\n";
 
     std::string mkerr;

@@ -1274,6 +1274,28 @@ int cmd_install(Ctx& ctx, const Opts& o) {
         }
     }
 
+    // NetworkManager 钩子：网络事件后重新下发规则，
+    // 否则 NM 重启 dnsmasq / 改写 resolv.conf 会让阻断静默失效。
+    bool nm_hook_ok = false;
+    std::string nm_hook_desc = "未配置";
+    if (!o.has("no-nm-hook")) {
+        if (!dnsblock::networkmanager_active()) {
+            nm_hook_desc = "未配置（NetworkManager 未运行）";
+        } else if (!dnsblock::nm_dnsmasq_dir_present() && !dnsblock::dnsmasq_installed()) {
+            nm_hook_desc = "未配置（未使用 dnsmasq）";
+        } else {
+            std::string herr;
+            if (dnsblock::install_nm_hook(target_bin, ctx.cfg.etc_dir, &herr)) {
+                nm_hook_ok = true;
+                nm_hook_desc = "/etc/NetworkManager/dispatcher.d/50-ban";
+            } else {
+                logx::warn("安装 NetworkManager 钩子失败: " + herr);
+                nm_hook_desc = "安装失败";
+            }
+        }
+    }
+    (void)nm_hook_ok;
+
     Session s(ctx.cfg);
     if (!s.begin(ctx.cfg, &err)) {
         logx::error(err);
@@ -1298,6 +1320,7 @@ int cmd_install(Ctx& ctx, const Opts& o) {
         std::printf("  开机恢复   : %s\n",
                     o.has("no-systemd") ? "未配置" : "ban-restore.service");
         std::printf("  定时刷新   : %s\n", refresh_desc.c_str());
+        std::printf("  NM 钩子    : %s\n", nm_hook_desc.c_str());
     }
     return kOk;
 }
@@ -1319,6 +1342,11 @@ int cmd_uninstall(Ctx& ctx, const Opts& o) {
     std::unique_ptr<FirewallBackend> backend = make_backend(ctx.cfg, &err);
     if (backend) backend->teardown(&err);
     dnsblock::teardown(ctx.cfg, &err);
+
+    {
+        std::string herr;
+        if (!dnsblock::remove_nm_hook(&herr)) logx::warn(herr);
+    }
 
     if (o.has("purge")) {
         util::remove_file(ctx.cfg.state_file);
@@ -1421,6 +1449,22 @@ int cmd_doctor(Ctx& ctx, const Opts& o) {
     if (dnsblock::dnsmasq_installed()) {
         check_line(dactive, "dnsmasq 正在运行", ddetail);
     }
+
+    bool nm_active = dnsblock::networkmanager_active();
+    if (nm_active) {
+        check_line(nm_active, "NetworkManager 正在运行",
+                   "它会用自己的 --conf-file 启动 dnsmasq，/etc/dnsmasq.d 可能不生效");
+        check_line(dnsblock::nm_dnsmasq_dir_present(), "NM dnsmasq drop-in 目录",
+                   dnsblock::nm_dnsmasq_dir_present()
+                       ? "/etc/NetworkManager/dnsmasq.d（本程序会同时写入）"
+                       : "不存在，仅写入 /etc/dnsmasq.d");
+        check_line(dnsblock::nm_hook_installed(), "NM dispatcher 钩子",
+                   dnsblock::nm_hook_installed()
+                       ? "/etc/NetworkManager/dispatcher.d/50-ban"
+                       : "未安装：网络事件后阻断可能失效，建议 sudo ban install");
+    } else {
+        std::printf("  NetworkManager: 未运行\n");
+    }
     std::printf("  当前 DNS 阻断方式: %s\n", di.detail.c_str());
 
     std::string hosts;
@@ -1500,6 +1544,7 @@ void print_help() {
         "系统集成:\n"
         "  install                    安装二进制、systemd 单元并启用开机恢复与定时刷新\n"
         "                             --bindir 目录   --interval 分钟   --no-systemd\n"
+        "                             --no-nm-hook   不安装 NetworkManager dispatcher 钩子\n"
         "  uninstall                  移除 systemd 单元与规则  --purge 同时删除配置\n"
         "  restore                    仅按已保存配置恢复规则（供 systemd 调用）\n"
         "  doctor                     环境自检\n"
@@ -1558,6 +1603,9 @@ int cli_main(int argc, char** argv) {
     ctx.cfg = Config::load(etc_dir, &cerr);
     logx::init(ctx.cfg.log_file, verbose, quiet);
     if (!cerr.empty()) logx::warn(cerr);
+
+    // 允许通过 ban.conf 覆盖上游 DNS 配置文件（特殊环境 / 测试）
+    set_resolv_conf(ctx.cfg.resolv_conf);
 
     if (rest.empty()) {
         print_help();

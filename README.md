@@ -169,6 +169,8 @@ journalctl -u ban-restore.service -u ban-refresh.service
 | 封禁后仍能访问 | `ban status` 看后端是否可用；确认应用是否走 DoH |
 | 临时封禁到期没解除 | 内核不支持集合 timeout 时会降级，需 `ban gc`；把 timer 间隔调小 |
 | 域名只拦了一部分子域 | 切到 `dns_mode = dnsmasq` |
+| dnsmasq 模式过一阵失效 | NM 会重启 dnsmasq：执行 `sudo ban install` 安装 dispatcher 钩子，用 `ban doctor` 看探测结果 |
+| 系统由 NetworkManager 管理 DNS | 程序会同时写 `/etc/NetworkManager/dnsmasq.d`；探测失败自动回退 hosts |
 | 误封导致无法上网 | `sudo ban flush` 立即清空 |
 
 ## 测试
