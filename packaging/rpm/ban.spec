@@ -1,3 +1,6 @@
+%global _unitdir %{_prefix}/lib/systemd/system
+%global debug_package %{nil}
+
 Name:           ban
 Version:        1.0.0
 Release:        1%{?dist}
@@ -6,7 +9,7 @@ License:        MIT
 URL:            https://github.com/peo-zyc/ban
 Source0:        %{name}-%{version}.tar.gz
 BuildRequires:  gcc-c++
-BuildRequires:  cmake
+BuildRequires:  cmake >= 3.16
 BuildRequires:  make
 Requires:       glibc
 Recommends:     nftables
@@ -27,14 +30,16 @@ ban 是一个 Linux 域名/IP 封禁命令行工具。
 %setup -q
 
 %build
-%cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%{_prefix}
-%cmake_build
+cmake -S . -B build-rpm \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=%{_prefix}
+cmake --build build-rpm --parallel
 
 %install
-%cmake_install
-install -Dm644 systemd/ban-restore.service %{buildroot}%{_unitdir}/ban-restore.service
-install -Dm644 systemd/ban-refresh.service %{buildroot}%{_unitdir}/ban-refresh.service
-install -Dm644 systemd/ban-refresh.timer   %{buildroot}%{_unitdir}/ban-refresh.timer
+DESTDIR=%{buildroot} cmake --install build-rpm
+
+install -d %{buildroot}%{_docdir}/%{name}
+install -m644 README.md LICENSE %{buildroot}%{_docdir}/%{name}/
 
 %post
 echo ">>> 运行 'sudo ban install' 以启用开机恢复与定时刷新"
@@ -44,8 +49,9 @@ echo ">>> 运行 'sudo ban install' 以启用开机恢复与定时刷新"
 %{_unitdir}/ban-restore.service
 %{_unitdir}/ban-refresh.service
 %{_unitdir}/ban-refresh.timer
-%doc README.md LICENSE
+%doc %{_docdir}/%{name}/README.md
+%doc %{_docdir}/%{name}/LICENSE
 
 %changelog
-* Sat Nov 08 2026 peo-zyc <peo-zyc@users.noreply.github.com> - 1.0.0-1
+* Sun Nov 08 2026 peo-zyc <peo-zyc@users.noreply.github.com> - 1.0.0-1
 - Initial release

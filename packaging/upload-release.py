@@ -72,13 +72,24 @@ if status == 422:
     if st2 != 200:
         sys.exit(f"创建 release 失败: {rel}")
     print(f"release 已存在，复用 id={rel['id']}")
+    # 同步标题与正文，避免 CHANGELOG 更新后 Release 仍是旧内容
+    patch = json.dumps(
+        {"name": "ban " + TAG, "body": body}, ensure_ascii=False
+    ).encode("utf-8")
+    st3, updated = call("PATCH", f"{API}/repos/{REPO}/releases/{rel['id']}", patch)
+    if st3 in (200, 201):
+        rel = updated
+        print("release 正文已同步")
+    else:
+        print(f"警告: 更新 release 正文失败 ({st3})")
 elif status not in (200, 201):
     sys.exit(f"创建 release 失败 ({status}): {rel}")
 else:
     print(f"release 已创建: {rel['html_url']}")
 
 release_id = rel["id"]
-existing = {a["name"] for a in rel.get("assets", [])}
+asset_ids = {a["name"]: a["id"] for a in rel.get("assets", [])}
+REPLACE = os.environ.get("REPLACE", "") not in ("", "0", "false", "no")
 
 # 2) 上传 dist/ 下所有文件
 if not os.path.isdir(DIST):
@@ -88,9 +99,17 @@ for name in sorted(os.listdir(DIST)):
     path = os.path.join(DIST, name)
     if not os.path.isfile(path):
         continue
-    if name in existing:
-        print(f"  - {name}: 已存在，跳过")
-        continue
+    if name in asset_ids:
+        if not REPLACE:
+            print(f"  - {name}: 已存在，跳过")
+            continue
+        st_del, _ = call(
+            "DELETE", f"{API}/repos/{REPO}/releases/assets/{asset_ids[name]}"
+        )
+        if st_del not in (200, 204):
+            print(f"  - {name}: 删除旧资产失败 ({st_del})")
+            continue
+        print(f"  - {name}: 旧资产已删除，重新上传")
     with open(path, "rb") as f:
         data = f.read()
     ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"

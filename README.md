@@ -81,6 +81,7 @@ sudo ban install
 | --- | --- | --- |
 | `ban_1.0.0_amd64.deb` | Debian / Ubuntu | `sudo dpkg -i ban_1.0.0_amd64.deb` |
 | `ban-1.0.0-1-x86_64.pkg.tar.zst` | Arch / CachyOS / Manjaro | `sudo pacman -U ban-1.0.0-1-x86_64.pkg.tar.zst` |
+| `ban-1.0.0-1.x86_64.rpm` | openSUSE / Fedora / RHEL | `sudo zypper in ./ban-1.0.0-1.x86_64.rpm` |
 | `ban-1.0.0-x86_64-linux.tar.gz` | 任意 glibc 发行版 | 解压后 `install -Dm755 ban /usr/local/bin/ban` |
 | `ban-1.0.0-x86_64-linux-static.tar.gz` | 无依赖（全静态） | 同上，可跑在任意 x86_64 Linux |
 | `ban-1.0.0.tar.gz` | 源码包 | `rpmbuild -ta ban-1.0.0.tar.gz`（openSUSE / Fedora） |
@@ -93,7 +94,7 @@ sudo ban install
 sh packaging/build-release.sh        # 产出到 dist/，含 SHA256SUMS
 ```
 
-> openSUSE / Fedora 的 RPM 需要 `rpmbuild`（`sudo zypper install rpm-build`），spec 见 `packaging/rpm/ban.spec`。
+> RPM 用 `packaging/rpm/ban.spec`：`rpmbuild --define "_sourcedir dist" -ba packaging/rpm/ban.spec`。
 
 ## 命令
 

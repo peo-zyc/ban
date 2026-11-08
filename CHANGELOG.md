@@ -31,9 +31,10 @@
 | --- | --- |
 | `ban_1.0.0_amd64.deb` | Debian / Ubuntu |
 | `ban-1.0.0-1-x86_64.pkg.tar.zst` | Arch / CachyOS / Manjaro |
+| `ban-1.0.0-1.x86_64.rpm` | openSUSE / Fedora / RHEL |
 | `ban-1.0.0-x86_64-linux.tar.gz` | 便携二进制（动态链接 glibc） |
 | `ban-1.0.0-x86_64-linux-static.tar.gz` | 全静态二进制 |
-| `ban-1.0.0.tar.gz` | 源码包（`rpmbuild -ta` 可产出 openSUSE / Fedora RPM） |
+| `ban-1.0.0.tar.gz` | 源码包（`rpmbuild -ta` 可重打包） |
 | `SHA256SUMS` | 校验和 |
 
 ### 测试
