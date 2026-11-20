@@ -2,7 +2,7 @@
 %global debug_package %{nil}
 
 Name:           ban
-Version:        1.1.0
+Version:        1.1.1
 Release:        1%{?dist}
 Summary:        Linux domain/IP blocking CLI with kernel-resident rules
 License:        MIT
@@ -53,6 +53,10 @@ echo ">>> 运行 'sudo ban install' 以启用开机恢复与定时刷新"
 %doc %{_docdir}/%{name}/LICENSE
 
 %changelog
+* Fri Nov 20 2026 peo-zyc <peo-zyc@users.noreply.github.com> - 1.1.1-1
+- Disable standalone dnsmasq.service before restarting NetworkManager
+- Reject 127.0.0.53 in resolv.conf unless systemd-resolved is active
+
 * Fri Nov 20 2026 peo-zyc <peo-zyc@users.noreply.github.com> - 1.1.0-1
 - Add `ban dns status|takeover|rollback` and `ban install --takeover-dns`
 - Verify dnsmasq owns port 53 and /etc/resolv.conf points at it after takeover

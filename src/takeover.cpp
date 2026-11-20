@@ -63,6 +63,10 @@ bool resolv_points_local(std::string* first_ns) {
     std::string text;
     if (!util::read_file(kResolv, text)) return false;
 
+    // 127.0.0.53 只有 systemd-resolved 活着时才算有效
+    util::ExecResult ra = util::run({"systemctl", "is-active", kResolved}, "", 8);
+    const bool resolved_active = ra.ok() && util::trim(ra.out) == "active";
+
     bool any = false;
     bool all_local = true;
     for (const std::string& raw : util::split(text, '\n', true)) {
@@ -72,7 +76,9 @@ bool resolv_points_local(std::string* first_ns) {
         if (ns.empty()) continue;
         any = true;
         if (first_ns && first_ns->empty()) *first_ns = ns;
-        if (!(ns == "127.0.0.1" || ns == "::1" || ns == "127.0.0.53")) all_local = false;
+        bool ok = (ns == "127.0.0.1" || ns == "::1");
+        if (!ok && ns == "127.0.0.53" && resolved_active) ok = true;
+        if (!ok) all_local = false;
     }
     return any && all_local;
 }
@@ -167,6 +173,10 @@ bool apply(std::string* err) {
 
     // 2) 停用 systemd-resolved（释放 127.0.0.53/54:53）
     run_ok({"systemctl", "disable", "--now", kResolved}, 60);
+
+    // 独立的 dnsmasq.service 必须先停：否则它占住 0.0.0.0:53，
+    // NetworkManager 随后启动的 dnsmasq 绑不上 127.0.0.1，会不断重试并告警。
+    run_ok({"systemctl", "disable", "--now", "dnsmasq"}, 60);
     run_ok({"systemctl", "reset-failed", "dnsmasq"}, 20);
 
     // 3) 清理 nsswitch 中的 resolve 模块

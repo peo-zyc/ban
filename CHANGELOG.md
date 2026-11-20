@@ -2,6 +2,14 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## v1.1.1 — 2026-11-20
+
+### 修复
+
+- **重启后独立的 `dnsmasq.service` 抢走 53 端口**：`systemctl disable systemd-resolved` 之后，若系统自带的 `dnsmasq.service` 仍 enabled，它会先绑 `0.0.0.0:53`；NetworkManager 随后启动自己的 dnsmasq 时 `failed to create listening socket for 127.0.0.1: 地址已在使用`，NM 进入退避重试，`resolv.conf` 也被写成无服务的 `127.0.0.53`，表现为随机 `EAI_AGAIN`
+  - `takeover` 现在会先 `systemctl disable --now dnsmasq`，保证 53 只由 NM 托管的 dnsmasq 使用
+- **`127.0.0.53` 误判为可用**：即使 `systemd-resolved` 已停用，校验仍把 `nameserver 127.0.0.53` 当作正常；现在只有 resolved 处于 active 时才接受该地址
+
 ## v1.1.0 — 2026-11-20
 
 ### 新增
