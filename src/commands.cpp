@@ -1465,11 +1465,14 @@ int cmd_doctor(Ctx& ctx, const Opts& o) {
                dnsblock::dnsmasq_installed() ? "" : "可选，安装后可支持子域通配");
     if (dnsblock::dnsmasq_installed()) {
         check_line(dactive, "dnsmasq 正在运行", ddetail);
+        if (!dactive && (ddetail == "failed" || ddetail == "activating")) {
+            warn_line("dnsmasq 启动失败",
+                      "通常因 53/UDP 被 systemd-resolved 占用；本程序已自动改用 hosts 模式，不会去重启它");
+        }
     }
 
     bool nm_active = dnsblock::networkmanager_active();
-    if (nm_active) {
-        check_line(nm_active, "NetworkManager 正在运行",
+    if (nm_active) {        check_line(nm_active, "NetworkManager 正在运行",
                    "它会用自己的 --conf-file 启动 dnsmasq，/etc/dnsmasq.d 可能不生效");
         check_line(dnsblock::nm_dnsmasq_dir_present(), "NM dnsmasq drop-in 目录",
                    dnsblock::nm_dnsmasq_dir_present()
@@ -1481,6 +1484,20 @@ int cmd_doctor(Ctx& ctx, const Opts& o) {
                        : "未安装：网络事件后阻断可能失效，建议 sudo ban install");
     } else {
         std::printf("  NetworkManager: 未运行\n");
+    }
+    {
+        std::string owner = dnsblock::port53_owner();
+        if (owner == "none") {
+            std::printf("  53/UDP 占用: 无人监听\n");
+        } else if (owner == "unknown") {
+            std::printf("  53/UDP 占用: 无法判断（ss 不可用）\n");
+        } else {
+            std::printf("  53/UDP 占用: %s\n", owner.c_str());
+            if (owner != "dnsmasq" && di.mode == "dnsmasq") {
+                warn_line("端口冲突风险", "53 被 " + owner +
+                                              std::string(" 占用，dnsmasq 无法绑定；本程序已避免重启它"));
+            }
+        }
     }
     std::printf("  当前 DNS 阻断方式: %s\n", di.detail.c_str());
 

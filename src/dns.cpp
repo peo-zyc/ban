@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 
 #include "log.h"
@@ -47,7 +48,17 @@ bool reload_dnsmasq(std::string* err) {
 
     if (unit_active) {
         if (run_ok({"systemctl", "reload", "dnsmasq"})) return true;
-        if (run_ok({"systemctl", "restart", "dnsmasq"})) return true;
+
+        // restart 会先 stop 再 start：若 53/UDP 被别的解析器占着，启动会失败，
+        // 等于把系统 DNS 直接拔掉。只在端口属于 dnsmasq 自己（或无人监听）时才允许。
+        const std::string owner = port53_owner();
+        if (owner == "dnsmasq" || owner == "none" || owner == "unknown" ||
+            owner == "unknown-process") {
+            if (run_ok({"systemctl", "restart", "dnsmasq"})) return true;
+            logx::warn("dnsmasq 重启失败（53/UDP 可能已被占用）");
+        } else {
+            logx::warn("53/UDP 由 " + owner + " 占用，为避免中断系统 DNS 不重启 dnsmasq");
+        }
     } else if (run_ok({"service", "dnsmasq", "reload"})) {
         return true;
     }
@@ -227,6 +238,41 @@ bool nm_dnsmasq_dir_present() { return util::is_directory(kNmDnsmasqDir); }
 
 bool nm_hook_installed() { return util::path_exists(kNmDispatcher); }
 
+std::string port53_owner() {
+    util::ExecResult r = util::run({"ss", "-lunpH"}, "", 8);
+    if (!r.ok()) r = util::run({"ss", "-lunp"}, "", 8);
+    if (!r.ok()) return "unknown";
+
+    for (const std::string& raw : util::split(r.out, '\n', true)) {
+        std::string line = util::trim(raw);
+        if (line.empty()) continue;
+        // 本地地址形如 127.0.0.53:53 / *:53 / [::]:53
+        if (line.find(":53 ") == std::string::npos && !util::ends_with(line, ":53")) {
+            continue;
+        }
+        size_t k = line.find("users:((\"");
+        if (k != std::string::npos) {
+            k += std::strlen("users:((\"");
+            size_t e = line.find('"', k);
+            if (e != std::string::npos && e > k) return line.substr(k, e - k);
+        }
+        // 非 root 时 ss 不显示进程名，退而根据已知解析器推断
+        util::ExecResult sr = util::run({"systemctl", "is-active", "systemd-resolved"}, "", 8);
+        if (sr.ok() && util::trim(sr.out) == "active") return "systemd-resolve";
+        return "unknown-process";
+    }
+    return "none";
+}
+
+// dnsmasq.service 是否处于 failed 状态（典型原因：53 端口被占用）
+bool dnsmasq_failed(std::string* detail) {
+    util::ExecResult r = util::run({"systemctl", "is-failed", "dnsmasq"}, "", 8);
+    std::string state = util::trim(r.out);
+    bool failed = (state == "failed");
+    if (detail) *detail = state.empty() ? "unknown" : state;
+    return failed;
+}
+
 bool dnsmasq_active(std::string* detail) {
     util::ExecResult r = util::run({"systemctl", "is-active", "dnsmasq"}, "", 10);
     std::string state = util::trim(r.out);
@@ -243,9 +289,25 @@ bool dnsmasq_usable(std::string* detail) {
         if (detail) *detail = "dnsmasq.service 正在运行";
         return true;
     }
+
+    // failed 状态几乎总是因为 53 端口抢不到：此时绝不能当成 NM 托管继续用
+    std::string fstate;
+    if (dnsmasq_failed(&fstate)) {
+        const std::string owner = port53_owner();
+        if (detail) {
+            *detail = "dnsmasq.service 处于 failed 状态（53/UDP 被 " + owner + " 占用）";
+        }
+        return false;
+    }
+
     if (networkmanager_active()) {
         if (detail) *detail = "由 NetworkManager 托管";
         return true;
+    }
+    const std::string owner = port53_owner();
+    if (owner == "systemd-resolve" || owner == "systemd-resolved") {
+        if (detail) *detail = "53/UDP 被 " + owner + " 占用且 dnsmasq 未运行";
+        return false;
     }
     if (detail) *detail = "未运行";
     return false;
@@ -298,6 +360,15 @@ bool apply(const Config& cfg, const std::vector<std::string>& domains, std::stri
     }
 
     if (mode == "dnsmasq") {
+        // 显式指定 dnsmasq，但它没在跑且 53 已被别的解析器占用：
+        // 直接走 hosts，避免为了生效去抢端口
+        const std::string owner = port53_owner();
+        if (!dnsmasq_active(nullptr) &&
+            (owner == "systemd-resolve" || owner == "systemd-resolved")) {
+            logx::warn("53/UDP 由 " + owner + " 占用且 dnsmasq 未运行，改用 hosts 模式");
+            return write_hosts(cfg, domains, err);
+        }
+
         std::string e;
         const bool reload_ok = apply_dnsmasq(cfg, domains, &e);
         if (!reload_ok) logx::warn("dnsmasq 重载失败: " + e);

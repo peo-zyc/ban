@@ -8,6 +8,11 @@
 
 - **非法 IPv4 被静默当成域名**：`ban add 300.1.1.1`、`ban add 1.2.3` 这类输入过去会通过域名校验，只往 DNS 层写了一条无效记录，IP 层完全没有下发——用户以为封了 IP，实际什么都没拦。现在顶级标签为纯数字的输入不再视为域名，并明确报错：`非法 IP 地址: 300.1.1.1（如果确实是域名，请加 --type domain）`
 - **`make` 直接失败**：版本号提取的 sed 正则里括号未转义，提前闭合了 `$(shell ...)`，导致 `*** 对函数“shell”的未终止的调用`
+- **53 端口冲突会危及系统 DNS**：过去在 `dnsmasq.service` 已运行时，reload 失败后会尝试 `restart`；而 `restart` 是先 stop 再 start，一旦 53/UDP 被 `systemd-resolved` 占用，启动就会失败——等于把系统 DNS 拔掉。现在：
+  - 重启前先查 53/UDP 归属，只有归属 `dnsmasq` 或无人监听时才允许 `restart`
+  - `dnsmasq.service` 处于 `failed` 时不再误判为“NetworkManager 托管”，直接走 hosts 模式
+  - 显式 `dns_mode = dnsmasq` 但 dnsmasq 未运行、且 53 已被其它解析器占用时，不抢端口，改用 hosts
+  - `ban doctor` 显示 53/UDP 占用者，并对 failed 状态给出成因与处理建议
 
 ### 测试
 

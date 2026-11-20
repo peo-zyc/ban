@@ -26,6 +26,10 @@ bool networkmanager_active();
 bool nm_dnsmasq_dir_present();
 bool nm_hook_installed();
 
+// 53/UDP 端口当前被谁占用：返回进程名（dnsmasq / systemd-resolve / ...），
+// "none" 表示无人监听，"unknown" 表示无法判断（ss 不可用）。
+std::string port53_owner();
+
 Info describe(const Config& cfg);
 
 // 写入/更新 DNS 阻断。domains 为空等价于清除阻断。
