@@ -480,6 +480,19 @@ bool looks_like_domain(const std::string& s) {
         }
         if (!(std::isalnum(c) || c == '-' || c == '_')) return false;
     }
+    // 顶级标签不能是纯数字（RFC 3696）：否则 "300.1.1.1"、"1.2.3" 这类
+    // 非法 IP 会被当成域名，用户以为封了 IP 而 IP 层根本没下发。
+    size_t dot = s.rfind('.');
+    std::string tld = (dot == std::string::npos) ? s : s.substr(dot + 1);
+    if (tld.empty()) return false;
+    bool all_digits = true;
+    for (char c : tld) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            all_digits = false;
+            break;
+        }
+    }
+    if (all_digits) return false;
     return true;
 }
 

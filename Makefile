@@ -1,6 +1,7 @@
 # 便捷构建（不依赖 cmake）
 CXX      ?= g++
-VERSION  ?= $(shell sed -n 's/^project(ban VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)
+# 注意：sed 正则里不要出现未转义/不配对的括号，否则会提前闭合 $(shell ...)
+VERSION  ?= $(shell sed -n 's/^project.ban VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic -DBAN_VERSION=\"$(VERSION)\"
 LDFLAGS  ?= -static-libstdc++ -static-libgcc
 SRCS     := $(wildcard src/*.cpp)

@@ -277,6 +277,19 @@ bool classify_target(const std::string& raw, const std::string& hint, RuleType& 
             value = d;
             return true;
         }
+        // 形如 "300.1.1.1" / "1.2.3" 的非法 IP：给出明确错误，
+        // 而不是悄悄当成域名（那样用户以为封了 IP，实际没有）
+        bool numeric_host = s.find('.') != std::string::npos;
+        for (char c : s) {
+            if (!std::isdigit(static_cast<unsigned char>(c)) && c != '.') {
+                numeric_host = false;
+                break;
+            }
+        }
+        if (numeric_host) {
+            err = "非法 IP 地址: " + s + "（如果确实是域名，请加 --type domain）";
+            return false;
+        }
         err = "无法识别的目标: " + s + "（应为域名 / IP / CIDR）";
         return false;
     }

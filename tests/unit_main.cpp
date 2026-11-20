@@ -43,6 +43,14 @@ static void test_domain() {
     check(util::normalize_domain("bad/name").empty(), "normalize_domain rejects slash");
     check(util::looks_like_domain("a-b.example.com"), "looks_like_domain");
     check(!util::looks_like_domain("1.2.3.4"), "looks_like_domain rejects ip");
+
+    // 回归：非法 IPv4 不能被当成域名
+    check(!util::looks_like_domain("300.1.1.1"), "rejects out-of-range ipv4");
+    check(!util::looks_like_domain("1.2.3"), "rejects 3-octet numeric host");
+    check(!util::looks_like_domain("999.999.999.999"), "rejects all-numeric dotted");
+    check(util::normalize_domain("300.1.1.1").empty(), "normalize_domain rejects bad ipv4");
+    check(util::looks_like_domain("123.example.com"), "allows numeric label before tld");
+    check(util::looks_like_domain("localhost"), "allows single label host");
 }
 
 static void test_duration() {
