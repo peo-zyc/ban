@@ -23,6 +23,7 @@
 #include "model.h"
 #include "resolver.h"
 #include "store.h"
+#include "takeover.h"
 #include "util.h"
 
 namespace {
@@ -1313,6 +1314,24 @@ int cmd_install(Ctx& ctx, const Opts& o) {
     }
     (void)nm_hook_ok;
 
+    // DNS 接管（可选）：把 systemd-resolved 换成 NM 托管的 dnsmasq
+    std::string dns_takeover_desc;
+    if (o.has("takeover-dns")) {
+        std::string terr;
+        if (takeover::apply(&terr)) {
+            logx::info("DNS 已切换到 NetworkManager 托管的 dnsmasq");
+            dns_takeover_desc = "已接管（NM 托管 dnsmasq）";
+        } else {
+            logx::warn("DNS 接管失败: " + terr);
+            dns_takeover_desc = "失败，可稍后执行 sudo ban dns takeover";
+        }
+    } else {
+        std::string why;
+        dns_takeover_desc = takeover::supported(&why)
+                                ? "未启用（加 --takeover-dns 启用）"
+                                : "不适用（" + why + "）";
+    }
+
     Session s(ctx.cfg);
     if (!s.begin(ctx.cfg, &err)) {
         logx::error(err);
@@ -1338,6 +1357,7 @@ int cmd_install(Ctx& ctx, const Opts& o) {
                     o.has("no-systemd") ? "未配置" : "ban-restore.service");
         std::printf("  定时刷新   : %s\n", refresh_desc.c_str());
         std::printf("  NM 钩子    : %s\n", nm_hook_desc.c_str());
+        std::printf("  DNS 接管   : %s\n", dns_takeover_desc.c_str());
     }
     return kOk;
 }
@@ -1381,6 +1401,52 @@ int cmd_uninstall(Ctx& ctx, const Opts& o) {
 }
 
 // ============================ restore / doctor ============================
+
+int cmd_dns(Ctx& ctx, const Opts& o) {
+    const std::string sub = o.pos.empty() ? std::string("status") : util::to_lower(o.pos[0]);
+
+    if (sub == "status") {
+        takeover::print_status();
+        return kOk;
+    }
+
+    if (!require_root()) return kPerm;
+
+    std::string err;
+    if (sub == "takeover" || sub == "apply") {
+        logx::info("正在接管 DNS：停用 systemd-resolved，改由 NetworkManager 托管 dnsmasq...");
+        if (!takeover::apply(&err)) {
+            logx::error(err);
+            logx::warn("可执行 sudo ban dns rollback 回滚");
+            return kErr;
+        }
+        logx::info("DNS 接管完成");
+
+        Session s(ctx.cfg);
+        if (s.begin(ctx.cfg, &err) && !apply_all(ctx, s.store, true, &err)) {
+            logx::warn("规则重新下发失败: " + err);
+            return kPartial;
+        }
+        return kOk;
+    }
+
+    if (sub == "rollback" || sub == "revert") {
+        if (!takeover::rollback(&err)) {
+            logx::error(err);
+            return kErr;
+        }
+        logx::info("已回滚到 systemd-resolved");
+
+        Session s(ctx.cfg);
+        if (s.begin(ctx.cfg, &err) && !apply_all(ctx, s.store, true, &err)) {
+            logx::warn("规则重新下发失败: " + err);
+        }
+        return kOk;
+    }
+
+    std::fprintf(stderr, "用法: ban dns <status|takeover|rollback>\n");
+    return kUsage;
+}
 
 int cmd_restore(Ctx& ctx, const Opts& o) {
     if (!require_root()) return kPerm;
@@ -1579,8 +1645,10 @@ void print_help() {
         "  install                    安装二进制、systemd 单元并启用开机恢复与定时刷新\n"
         "                             --bindir 目录   --interval 分钟   --no-systemd\n"
         "                             --no-nm-hook   不安装 NetworkManager dispatcher 钩子\n"
+        "                             --takeover-dns 停用 systemd-resolved，改用 NM 托管的 dnsmasq\n"
         "  uninstall                  移除 systemd 单元与规则  --purge 同时删除配置\n"
         "  restore                    仅按已保存配置恢复规则（供 systemd 调用）\n"
+        "  dns status|takeover|rollback  DNS 层接管：用 NM 托管的 dnsmasq 取代 systemd-resolved\n"
         "  doctor                     环境自检\n"
         "\n"
         "全局选项:\n"
@@ -1672,6 +1740,7 @@ int cli_main(int argc, char** argv) {
     else if (cmd == "install") rc = cmd_install(ctx, o);
     else if (cmd == "uninstall") rc = cmd_uninstall(ctx, o);
     else if (cmd == "restore") rc = cmd_restore(ctx, o);
+    else if (cmd == "dns") rc = cmd_dns(ctx, o);
     else if (cmd == "doctor") rc = cmd_doctor(ctx, o);
     else if (cmd == "help") {
         print_help();

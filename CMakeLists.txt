@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ban VERSION 1.0.2 LANGUAGES CXX)
+project(ban VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,7 @@ set(BAN_SOURCES
   src/backend_nft.cpp
   src/backend_iptables.cpp
   src/dns.cpp
+  src/takeover.cpp
   src/commands.cpp
 )
 

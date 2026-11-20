@@ -2,6 +2,23 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## v1.1.0 — 2026-11-20
+
+### 新增
+
+- **DNS 接管内置到 CLI**：`ban dns status|takeover|rollback`，以及 `ban install --takeover-dns`
+  把系统 DNS 从 `systemd-resolved` 换成 **NetworkManager 托管的 dnsmasq**，DNS 层因此真正支持 `*.example.com` 通配
+- 接管后自动校验两道关：53/UDP 必须归 `dnsmasq`；`/etc/resolv.conf` 必须指向 `127.0.0.1`/`::1`
+- `rollback` 完整还原：NM 配置、`nsswitch.conf`、`/etc/resolv.conf`（含原来的符号链接目标）
+- `packaging/dns-takeover.sh` 退化为薄包装，逻辑统一在二进制里
+
+### 修复
+
+- **接管后 dnsmasq 形同虚设**：`systemctl disable systemd-resolved` 之后，`/etc/resolv.conf` 仍是指向 `/run/systemd/resolve/resolv.conf` 的旧符号链接（内容 `nameserver 192.168.2.1`），所有解析直接打到网关，dnsmasq 虽然在监听却没人问它
+  - NM 配置增加 `rc-manager=file`，由 NM 直接写 `resolv.conf`
+  - 校验失败时兜底重写为 `nameserver 127.0.0.1 / ::1`
+  - `ban dns status` 会明确标注 `（未指向 dnsmasq！）`
+
 ## v1.0.2 — 2026-11-20
 
 ### 修复
