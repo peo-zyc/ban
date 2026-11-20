@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <sstream>
 
 #include "log.h"
@@ -37,6 +38,22 @@ bool run_ok(const std::vector<std::string>& argv, int timeout = 20) {
     return util::run(argv, "", timeout).ok();
 }
 
+void sleep_ms(int ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = static_cast<long>(ms % 1000) * 1000000L;
+    ::nanosleep(&ts, nullptr);
+}
+
+// 等待 dnsmasq 重新监听 53（最多 timeout_ms）
+bool wait_dnsmasq_listening(int timeout_ms) {
+    for (int waited = 0; waited <= timeout_ms; waited += 200) {
+        if (port53_owner() == "dnsmasq") return true;
+        sleep_ms(200);
+    }
+    return false;
+}
+
 // 让 dnsmasq 重新加载配置。覆盖三种部署形态：
 //   1) 传统 dnsmasq.service（已运行时才 reload/restart，绝不“顺手启动”它）
 //   2) sysv-init 的 service 命令
@@ -67,7 +84,24 @@ bool reload_dnsmasq(std::string* err) {
         if (exists_in_path("nmcli")) {
             run_ok({"nmcli", "general", "reload", "dns-rc"}, 20);
         }
-        if (run_ok({"systemctl", "reload", "NetworkManager"}, 30)) return true;
+
+        // NetworkManager 托管的 dnsmasq 不会热加载 address=，
+        // 只能让它重启：杀掉 NM 的 dnsmasq 子进程，NM 会立即重新拉起，
+        // 新进程会重新读取 --conf-dir=/etc/NetworkManager/dnsmasq.d。
+        if (!unit_active && exists_in_path("pkill")) {
+            util::run({"pkill", "-f", "dnsmasq.*--enable-dbus"}, "", 10);
+            if (wait_dnsmasq_listening(6000)) return true;
+            logx::warn("NM 的 dnsmasq 未按预期重启，尝试重启 NetworkManager");
+            if (run_ok({"systemctl", "restart", "NetworkManager"}, 90)) {
+                return wait_dnsmasq_listening(6000);
+            }
+            if (err) *err = "无法让 NetworkManager 重新拉起 dnsmasq";
+            return false;
+        }
+
+        if (run_ok({"systemctl", "reload", "NetworkManager"}, 30)) {
+            if (wait_dnsmasq_listening(1500)) return true;
+        }
     }
 
     if (err) {

@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## v1.1.2 — 2026-11-20
+
+### 修复
+
+- **NM 托管的 dnsmasq 永远拿不到新规则**：`address=` 属于启动期配置，`systemctl reload dnsmasq`（SIGHUP）只会重读 hosts / resolv，不会重载 drop-in。于是 `ban add` 每次探测都失败并退回 hosts 模式，子域通配形同虚设
+  - 现在对 NM 托管的 dnsmasq：`pkill -f 'dnsmasq.*--enable-dbus'` 让 NM 立即重新拉起（重新读取 `--conf-dir=/etc/NetworkManager/dnsmasq.d`），并等待其真正监听 53
+  - 若 6 秒内未恢复，兜底 `systemctl restart NetworkManager`
+  - 独立 `dnsmasq.service` 场景仍走 `reload` → 失败再 `restart`（带端口归属保护）
+
 ## v1.1.1 — 2026-11-20
 
 ### 修复
